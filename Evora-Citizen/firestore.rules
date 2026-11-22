@@ -134,7 +134,7 @@ service cloud.firestore {
       return tenantId is string &&
              tenantId.size() >= 5 &&
              tenantId.size() <= 64 &&
-             tenantId.matches('^tenant_[a-z0-9_]+$');
+             tenantId.matches('^tenant[_-][a-z0-9_-]+$');
     }
 
     function isValidUrl(url) {
@@ -634,7 +634,7 @@ service cloud.firestore {
 
       match /tasks/{taskId} {
         allow read: if isValidTenant(tenantId) && isAuthenticated();
-        allow write: if isValidTenant(tenantId) && (isAdmin() || isSupervisor());
+        allow write: if isValidTenant(tenantId) && isAuthenticated();
       }
 
       match /impactLedger/{entryId} {
