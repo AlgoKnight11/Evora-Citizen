@@ -300,15 +300,74 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
       recentSubmissionTimes: updatedTimes,
     );
 
-    // 5. Save to Firestore
+    // 5. Save to Firestore (Both civicFlowCases and field worker tasks queue)
     try {
       if (_firestore != null) {
-        await _firestore
+        final tenantRef = _firestore
             .collection('tenants')
-            .doc(AppConstants.defaultTenantId)
+            .doc(AppConstants.defaultTenantId);
+
+        // 5a. Save official citizen grievance case
+        await tenantRef
             .collection('civicFlowCases')
             .doc(newCase.id)
             .set(newCase.toMap());
+
+        // 5b. Dual-write corresponding field dispatch task for Evora-Worker
+        final taskId = 'task_${newCase.id}';
+        final priorityVal = priority == 'urgent'
+            ? 'p1'
+            : (priority == 'high'
+                ? 'p2'
+                : (priority == 'low' ? 'p4' : 'p3'));
+        final slaHours = priority == 'urgent'
+            ? 4
+            : (priority == 'high'
+                ? 12
+                : (priority == 'low' ? 48 : 24));
+        final dueAt = now.add(Duration(hours: slaHours));
+
+        final taskPayload = {
+          'id': taskId,
+          'tenantId': AppConstants.defaultTenantId,
+          'sourceType': 'CIVIC_FLOW_CASE',
+          'civicFlowCaseId': newCase.id,
+          'workerUid': null,
+          'teamId': null,
+          'departmentId': resolvedLeadDept,
+          'departmentNameSnapshot': resolvedLeadDept,
+          'wardId': locality.trim(),
+          'categoryId': normalizedCategory,
+          'categoryNameSnapshot': subcategory,
+          'status': 'assigned',
+          'priority': priorityVal,
+          'title': '[$caseNumber] ${subcategory.isNotEmpty ? subcategory : normalizedCategory.toUpperCase().replaceAll('_', ' ')}',
+          'instructions': description.trim(),
+          'safetyPrecautions': [
+            'Wear high-visibility vest and appropriate municipal safety PPE.',
+            'Assess situational hazards and vehicular traffic before starting work.',
+          ],
+          'requiredEvidence': ['geo_tagged_photo', 'completion_signature'],
+          'location': {
+            'latitude': loc.latitude,
+            'longitude': loc.longitude,
+            'addressSummary': locality.trim(),
+            'landmark': landmark?.trim().isNotEmpty == true ? landmark!.trim() : null,
+            'wardId': locality.trim(),
+            'wardNameSnapshot': locality.trim(),
+          },
+          'assignedByUid': citizenName,
+          'assignedAt': now.toUtc().toIso8601String(),
+          'dueAt': dueAt.toUtc().toIso8601String(),
+          'updatedAt': now.toUtc().toIso8601String(),
+          'version': 1,
+          'schemaVersion': 1,
+        };
+
+        await tenantRef
+            .collection('tasks')
+            .doc(taskId)
+            .set(taskPayload);
       }
     } catch (e) {
       LoggingService.logError('Firestore submitCase sync note: $e', correlationId: cid);
