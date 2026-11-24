@@ -212,6 +212,7 @@ class CivicFlowCase {
       'caseNumber': caseNumber,
       'tenantId': tenantId,
       'citizenId': citizenId,
+      'reporterUid': citizenId,
       'citizenName': citizenName,
       'citizenPhone': citizenPhone,
       'category': category,

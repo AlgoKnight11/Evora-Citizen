@@ -84,6 +84,22 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  /// Ensure an active Firebase Auth session exists so Firestore security rules permit cloud writes
+  Future<String?> _ensureFirebaseAuthSession() async {
+    final auth = _firebaseAuth;
+    if (auth == null) return null;
+    if (auth.currentUser != null) {
+      return auth.currentUser!.uid;
+    }
+    try {
+      final cred = await auth.signInAnonymously();
+      return cred.user?.uid;
+    } catch (e) {
+      LoggingService.logBreadcrumb('Anonymous Firebase auth fallback note: $e');
+      return null;
+    }
+  }
+
   /// Clear persisted session on explicit sign out
   Future<void> _clearPersistedSession() async {
     try {
@@ -146,7 +162,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
           if (!isPersisted) {
             state = state.copyWith(user: null, isLoading: false);
           } else if (providerType == 'phone_test' || providerType == 'phone_mock') {
-            // Keep dev-test or mock phone session alive across restarts
+            // Keep dev-test or mock phone session alive across restarts and ensure active Firebase Auth
+            _ensureFirebaseAuthSession();
           }
         }
       });
@@ -399,8 +416,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
         (verificationId.startsWith('mock_') && smsCode.trim() == '123456')) {
       if (smsCode.trim() == '123456') {
         await Future.delayed(const Duration(milliseconds: 300));
+
+        // Ensure active Firebase Auth session so security rules permit Firestore writes
+        final authUid = await _ensureFirebaseAuthSession();
+
         final devUser = EvoraUser(
-          uid: 'test_phone_user_9999999999',
+          uid: authUid ?? 'test_phone_user_9999999999',
           displayName: 'Resident (Dev Test)',
           phoneNumber: '+91 9999999999',
           tenantId: AppConstants.defaultTenantId,

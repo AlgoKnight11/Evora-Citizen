@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -203,7 +204,15 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
       );
       return null;
     }
-    final uid = currentUser.uid;
+    // Ensure active Firebase Auth session so security rules permit dual-write
+    try {
+      if (FirebaseAuth.instance.currentUser == null) {
+        await FirebaseAuth.instance.signInAnonymously();
+      }
+    } catch (e) {
+      LoggingService.logBreadcrumb('Anonymous auth on submitCase fallback note: $e', correlationId: cid);
+    }
+    final effectiveUid = FirebaseAuth.instance.currentUser?.uid ?? currentUser.uid;
     final citizenName = _resolveDisplayName(currentUser.displayName);
     final citizenPhone = currentUser.phoneNumber;
 
@@ -262,7 +271,7 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
       id: 'cf_${_uuid.v4().substring(0, 8)}',
       caseNumber: caseNumber,
       tenantId: AppConstants.defaultTenantId,
-      citizenId: uid,
+      citizenId: effectiveUid,
       citizenName: citizenName,
       citizenPhone: citizenPhone,
       category: normalizedCategory,
@@ -289,7 +298,10 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
 
     // 4. Persist locally & update state
     final updatedCases = [newCase, ...state.citizenCases];
-    await _saveCachedCases(uid, updatedCases);
+    await _saveCachedCases(currentUser.uid, updatedCases);
+    if (effectiveUid != currentUser.uid) {
+      await _saveCachedCases(effectiveUid, updatedCases);
+    }
     if (!mounted) return null;
 
     final updatedTimes = [now, ...state.recentSubmissionTimes];
