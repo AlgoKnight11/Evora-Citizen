@@ -380,9 +380,14 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
             .collection('tasks')
             .doc(taskId)
             .set(taskPayload);
+
+        LoggingService.logBreadcrumb(
+          'Dual-wrote task $taskId to tenant ${AppConstants.defaultTenantId}',
+          correlationId: cid,
+        );
       }
-    } catch (e) {
-      LoggingService.logError('Firestore submitCase sync note: $e', correlationId: cid);
+    } catch (e, stack) {
+      LoggingService.logError('Firestore submitCase sync error: $e\n$stack', correlationId: cid);
     }
 
     LoggingService.logBreadcrumb('Case created successfully with reference $caseNumber', correlationId: cid);
