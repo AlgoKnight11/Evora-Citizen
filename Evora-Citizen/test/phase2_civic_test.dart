@@ -7,6 +7,7 @@ import 'package:evora/features/civic_book/models/civic_book_model.dart';
 import 'package:evora/features/civic_book/services/civic_book_service.dart';
 import 'package:evora/features/civic_flow/models/civic_flow_model.dart';
 import 'package:evora/features/civic_flow/services/civic_flow_service.dart';
+import 'package:evora/services/cloudinary_service.dart';
 import 'package:evora/services/location_service.dart';
 
 class _TestAuthNotifier extends AuthNotifier {
@@ -265,6 +266,73 @@ void main() {
       );
       expect(caseNumber, isNull);
       expect(guestContainer.read(civicFlowProvider).citizenCases, isEmpty);
+    });
+  });
+
+  group('Phase 2 CivicFlow Grievance Withdrawal & Cloudinary Cleanup Tests', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+    });
+
+    test('CloudinaryService extracts public ID from secure Cloudinary URLs and raw IDs', () {
+      const fullUrl =
+          'https://res.cloudinary.com/evora/image/upload/v1700000000/civic_evidence/sample_img_123.jpg';
+      expect(CloudinaryService.extractPublicId(fullUrl), 'civic_evidence/sample_img_123');
+
+      const nonVersionedUrl =
+          'https://res.cloudinary.com/evora/image/upload/civic_evidence/sample_img_456.png';
+      expect(CloudinaryService.extractPublicId(nonVersionedUrl), 'civic_evidence/sample_img_456');
+
+      const rawId = 'civic_evidence/sample_img_789';
+      expect(CloudinaryService.extractPublicId(rawId), 'civic_evidence/sample_img_789');
+    });
+
+    test('withdrawCase removes grievance from local state and disk cache', () async {
+      final container = ProviderContainer(
+        overrides: [
+          authProvider.overrideWith((ref) => _TestAuthNotifier(testUser)),
+          civicFlowProvider.overrideWith((ref) => CivicFlowNotifier(ref, null, false)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final notifier = container.read(civicFlowProvider.notifier);
+
+      // Submit a test case in offline/mock mode
+      final caseNumber = await notifier.submitCase(
+        category: 'Solid Waste',
+        subcategory: 'Garbage Dump Overflow',
+        description: 'Test overflow complaint to be withdrawn early.',
+        locality: 'Dehradun Central',
+      );
+
+      expect(caseNumber, isNotNull);
+      final initialCases = container.read(civicFlowProvider).citizenCases;
+      expect(initialCases.length, 1);
+      final caseToWithdraw = initialCases.first;
+      expect(caseToWithdraw.caseNumber, caseNumber);
+
+      // Now withdraw the case
+      final success = await notifier.withdrawCase(caseToWithdraw.id);
+      expect(success, isTrue);
+
+      // Verify case is removed from provider state
+      final updatedCases = container.read(civicFlowProvider).citizenCases;
+      expect(updatedCases.where((c) => c.id == caseToWithdraw.id), isEmpty);
+    });
+
+    test('withdrawCase handles non-existent case safely', () async {
+      final container = ProviderContainer(
+        overrides: [
+          authProvider.overrideWith((ref) => _TestAuthNotifier(testUser)),
+          civicFlowProvider.overrideWith((ref) => CivicFlowNotifier(ref, null, false)),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final notifier = container.read(civicFlowProvider.notifier);
+      final success = await notifier.withdrawCase('non_existent_case_999');
+      expect(success, isFalse);
     });
   });
 }

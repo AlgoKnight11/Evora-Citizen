@@ -393,8 +393,14 @@ service cloud.firestore {
         allow update: if isValidTenant(tenantId) &&
                          isValidCivicCase(request.resource.data);
 
-        // Deletion of official civic grievance records is strictly disallowed for compliance
-        allow delete: if false;
+        // Allow the reporter/citizen who filed the grievance or an admin to delete/withdraw it
+        allow delete: if isValidTenant(tenantId) && (
+          (isAuthenticated() && (
+            resource.data.get('reporterUid', '') == request.auth.uid ||
+            resource.data.get('citizenId', '') == request.auth.uid
+          )) ||
+          isAdmin()
+        );
       }
 
       // -------------------------------------------------------------

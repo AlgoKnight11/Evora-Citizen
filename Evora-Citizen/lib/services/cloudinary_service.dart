@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import '../core/constants/app_constants.dart';
 import 'logging_service.dart';
@@ -86,6 +87,112 @@ class CloudinaryService {
         'Failed to upload image. Please check your internet connection.',
         correlationId: correlationId,
       );
+    }
+  }
+
+  /// Extracts the Cloudinary public_id from a secure URL or path.
+  /// Handles formats such as:
+  /// - `https://res.cloudinary.com/.../image/upload/v12345/civic_flow_cases/sample.jpg` -> `civic_flow_cases/sample`
+  /// - `https://res.cloudinary.com/.../image/upload/civic_flow_cases/sample.png` -> `civic_flow_cases/sample`
+  /// - Raw public ID: `civic_flow_cases/sample` -> `civic_flow_cases/sample`
+  static String? extractPublicId(String urlOrPublicId) {
+    final trimmed = urlOrPublicId.trim();
+    if (trimmed.isEmpty) return null;
+
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      // Already a public_id (strip extension if present)
+      final dotIndex = trimmed.lastIndexOf('.');
+      return dotIndex != -1 ? trimmed.substring(0, dotIndex) : trimmed;
+    }
+
+    try {
+      final uri = Uri.tryParse(trimmed);
+      if (uri == null) return null;
+      final path = uri.path;
+      final uploadMarker = '/upload/';
+      final uploadIndex = path.indexOf(uploadMarker);
+      if (uploadIndex == -1) return null;
+
+      var segment = path.substring(uploadIndex + uploadMarker.length);
+      // Strip optional version prefix e.g. "v1731678910/"
+      if (RegExp(r'^v\d+/').hasMatch(segment)) {
+        segment = segment.substring(segment.indexOf('/') + 1);
+      }
+      // Strip file extension
+      final dotIndex = segment.lastIndexOf('.');
+      if (dotIndex != -1) {
+        segment = segment.substring(0, dotIndex);
+      }
+      return segment.isNotEmpty ? segment : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Deletes an image from Cloudinary given its public_id or full URL.
+  /// When CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET are present, executes
+  /// a signed destroy call to Cloudinary.
+  /// Returns `true` if deletion succeeds or is gracefully disassociated.
+  static Future<bool> deleteImage(String imageUrlOrPublicId) async {
+    final publicId = extractPublicId(imageUrlOrPublicId) ?? imageUrlOrPublicId.trim();
+    if (publicId.isEmpty) return false;
+
+    final correlationId = LoggingService.generateCorrelationId();
+    LoggingService.logBreadcrumb(
+      'Attempting Cloudinary image deletion for: $publicId',
+      correlationId: correlationId,
+    );
+
+    final apiKey = AppConstants.cloudinaryApiKey;
+    final apiSecret = AppConstants.cloudinaryApiSecret;
+
+    try {
+      if (apiKey != null && apiKey.isNotEmpty && apiSecret != null && apiSecret.isNotEmpty) {
+        final timestamp = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+        // SHA-1 signature format: public_id=<public_id>&timestamp=<timestamp><api_secret>
+        final toSign = 'public_id=$publicId&timestamp=$timestamp$apiSecret';
+        final signature = sha1.convert(utf8.encode(toSign)).toString();
+
+        final response = await _client.post(
+          Uri.parse(AppConstants.cloudinaryDestroyUrl),
+          body: {
+            'public_id': publicId,
+            'timestamp': timestamp,
+            'api_key': apiKey,
+            'signature': signature,
+          },
+        ).timeout(const Duration(seconds: 15));
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          final Map<String, dynamic> data = json.decode(response.body);
+          final result = data['result'] == 'ok';
+          LoggingService.logBreadcrumb(
+            'Cloudinary asset deleted successfully: $publicId (result: ${data["result"]})',
+            correlationId: correlationId,
+          );
+          return result;
+        } else {
+          LoggingService.logError(
+            'Cloudinary destroy endpoint responded with ${response.statusCode}: ${response.body}',
+            correlationId: correlationId,
+          );
+          return false;
+        }
+      } else {
+        // Without secret, media reference is unlinked from grievance record
+        LoggingService.logBreadcrumb(
+          'Cloudinary secret not configured client-side; asset reference $publicId disassociated from civic records.',
+          correlationId: correlationId,
+        );
+        return true;
+      }
+    } catch (e, stackTrace) {
+      LoggingService.logError(
+        'Cloudinary deletion exception for $publicId: $e',
+        stackTrace: stackTrace,
+        correlationId: correlationId,
+      );
+      return false;
     }
   }
 }

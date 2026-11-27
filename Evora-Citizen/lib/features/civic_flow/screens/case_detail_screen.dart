@@ -26,6 +26,61 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
     super.dispose();
   }
 
+  Future<void> _confirmWithdraw(CivicFlowCase c) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Withdraw Grievance?'),
+        content: Text(
+          'Are you sure you want to withdraw grievance ${c.caseNumber}?\n\n'
+          'If the issue is already resolved before municipal worker action, withdrawing will permanently remove this grievance from your account, cancel all active municipal dispatches, and delete all associated media files.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EvoraColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Withdraw Grievance'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() => _isActionLoading = true);
+      final messenger = ScaffoldMessenger.of(context);
+      final navigator = Navigator.of(context);
+
+      final success = await ref.read(civicFlowProvider.notifier).withdrawCase(c.id);
+
+      if (mounted) {
+        setState(() => _isActionLoading = false);
+        if (success) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Grievance successfully withdrawn and removed.'),
+              backgroundColor: EvoraColors.primary,
+            ),
+          );
+          navigator.pop();
+        } else {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Failed to withdraw grievance. Please try again.'),
+              backgroundColor: EvoraColors.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(civicFlowProvider);
@@ -50,6 +105,13 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(c.caseNumber),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: EvoraColors.error),
+            tooltip: 'Withdraw Grievance',
+            onPressed: _isActionLoading ? null : () => _confirmWithdraw(c),
+          ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -499,6 +561,62 @@ class _CaseDetailScreenState extends ConsumerState<CaseDetailScreen> {
                   );
                 },
               ),
+
+              // Withdraw Grievance Action Card
+              const SizedBox(height: 24),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: EvoraColors.error.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: EvoraColors.error.withValues(alpha: 0.2)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.info_outline, size: 20, color: EvoraColors.error),
+                        SizedBox(width: 8),
+                        Text(
+                          'Issue Resolved Early?',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: EvoraColors.error),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'If this civic issue was resolved before municipal action or was filed by mistake, you may withdraw this grievance. This permanently removes it from your account, cleans up stored media, and cancels active dispatches.',
+                      style: TextStyle(fontSize: 13, height: 1.3),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        icon: _isActionLoading
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: EvoraColors.error),
+                              )
+                            : const Icon(Icons.delete_outline, size: 18, color: EvoraColors.error),
+                        label: Text(
+                          _isActionLoading ? 'Withdrawing...' : 'Withdraw Grievance',
+                          style: const TextStyle(color: EvoraColors.error, fontWeight: FontWeight.w700),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: EvoraColors.error),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _isActionLoading ? null : () => _confirmWithdraw(c),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
             ],
           ),
         ),

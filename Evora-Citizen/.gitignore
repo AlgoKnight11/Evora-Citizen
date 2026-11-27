@@ -65,6 +65,8 @@ screen_splash_flutter.png
 .env
 .env.*
 !.env.example
+node_modules/
+**/node_modules/
 
 # Android release signing keys and credentials
 *.keystore

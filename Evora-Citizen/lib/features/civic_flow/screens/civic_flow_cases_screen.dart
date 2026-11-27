@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../../core/theme/evora_colors.dart';
 import '../../../core/utils/auth_guard.dart';
 import '../../auth/services/auth_service.dart';
@@ -203,15 +204,91 @@ class _CivicFlowCasesScreenState extends ConsumerState<CivicFlowCasesScreen>
         separatorBuilder: (context, index) => const SizedBox(height: 14),
         itemBuilder: (context, index) {
           final c = cases[index];
-          return _buildCaseCard(context, c);
+          return _buildCaseCard(context, c, notifier);
         },
       ),
     );
   }
 
-  Widget _buildCaseCard(BuildContext context, CivicFlowCase c) {
+  Future<void> _confirmWithdraw(
+    CivicFlowCase c,
+    CivicFlowNotifier notifier,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Withdraw Grievance?'),
+        content: Text(
+          'Are you sure you want to withdraw grievance ${c.caseNumber}?\n\n'
+          'If the issue is already resolved before municipal worker action, withdrawing will permanently remove this grievance from your account, cancel all active municipal dispatches, and delete all associated media files.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: EvoraColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Withdraw Grievance'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final messenger = ScaffoldMessenger.of(context);
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ),
+              SizedBox(width: 12),
+              Text('Withdrawing grievance...'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      final success = await notifier.withdrawCase(c.id);
+
+      if (mounted) {
+        messenger.hideCurrentSnackBar();
+        if (success) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Grievance successfully withdrawn and removed.'),
+              backgroundColor: EvoraColors.primary,
+            ),
+          );
+        } else {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Failed to withdraw grievance. Please try again.'),
+              backgroundColor: EvoraColors.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  Widget _buildCaseCard(
+    BuildContext context,
+    CivicFlowCase c,
+    CivicFlowNotifier notifier,
+  ) {
     final statusColor = _getStatusColor(c.status);
     final statusLabel = CivicFlowStatus.getLabel(c.status);
+    final dateFormat = DateFormat('dd MMM yyyy');
 
     return Container(
       decoration: BoxDecoration(
@@ -311,6 +388,34 @@ class _CivicFlowCasesScreenState extends ConsumerState<CivicFlowCasesScreen>
                       ),
                     ),
                   ],
+                ],
+              ),
+
+              const SizedBox(height: 12),
+              Divider(height: 1, color: EvoraColors.outlineVariant.withValues(alpha: 0.3)),
+              const SizedBox(height: 8),
+
+              // Action Row: Date & Withdraw Grievance Button
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Filed on ${dateFormat.format(c.createdAt)}',
+                    style: const TextStyle(fontSize: 11.5, color: EvoraColors.outline),
+                  ),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: EvoraColors.error,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text(
+                      'Withdraw',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+                    ),
+                    onPressed: () => _confirmWithdraw(c, notifier),
+                  ),
                 ],
               ),
             ],

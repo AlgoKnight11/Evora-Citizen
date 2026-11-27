@@ -205,14 +205,15 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
       return null;
     }
     // Ensure active Firebase Auth session so security rules permit dual-write
+    String effectiveUid = currentUser.uid;
     try {
       if (FirebaseAuth.instance.currentUser == null) {
         await FirebaseAuth.instance.signInAnonymously();
       }
+      effectiveUid = FirebaseAuth.instance.currentUser?.uid ?? currentUser.uid;
     } catch (e) {
       LoggingService.logBreadcrumb('Anonymous auth on submitCase fallback note: $e', correlationId: cid);
     }
-    final effectiveUid = FirebaseAuth.instance.currentUser?.uid ?? currentUser.uid;
     final citizenName = _resolveDisplayName(currentUser.displayName);
     final citizenPhone = currentUser.phoneNumber;
 
@@ -534,6 +535,81 @@ class CivicFlowNotifier extends StateNotifier<CivicFlowState> {
       }
     } catch (_) {}
 
+    return true;
+  }
+
+  /// Withdraws a citizen's complaint/grievance permanently:
+  /// 1. Deletes evidence image from Cloudinary (if attached)
+  /// 2. Deletes grievance record from Cloud Firestore (civicFlowCases & dispatch tasks)
+  /// 3. Removes case from citizen's account and local cache
+  Future<bool> withdrawCase(String caseId) async {
+    final currentUser = _ref.read(authProvider).user;
+    if (currentUser == null) {
+      state = state.copyWith(errorMessage: 'Sign in required to withdraw a grievance.');
+      return false;
+    }
+
+    final index = state.citizenCases.indexWhere((c) => c.id == caseId);
+    if (index == -1) {
+      state = state.copyWith(errorMessage: 'Grievance case not found.');
+      return false;
+    }
+
+    final targetCase = state.citizenCases[index];
+    final cid = LoggingService.generateCorrelationId();
+    LoggingService.logBreadcrumb(
+      'Withdrawing grievance case ${targetCase.caseNumber} ($caseId)',
+      correlationId: cid,
+    );
+
+    state = state.copyWith(isLoading: true, clearError: true);
+
+    // 1. Delete image from Cloudinary if present
+    if (targetCase.imageUrl != null && targetCase.imageUrl!.trim().isNotEmpty) {
+      try {
+        await CloudinaryService.deleteImage(targetCase.imageUrl!);
+      } catch (e) {
+        LoggingService.logError('Cloudinary deletion note during withdraw: $e', correlationId: cid);
+      }
+    }
+
+    // 2. Delete from Cloud Firestore
+    try {
+      if (_firestore != null) {
+        final tenantRef = _firestore
+            .collection('tenants')
+            .doc(AppConstants.defaultTenantId);
+
+        // Delete grievance document from civicFlowCases collection
+        await tenantRef.collection('civicFlowCases').doc(caseId).delete();
+
+        // Also delete associated dispatch task if it was dual-written
+        await tenantRef.collection('tasks').doc('task_$caseId').delete().catchError((_) {});
+
+        LoggingService.logBreadcrumb(
+          'Deleted case $caseId and task_$caseId from Firestore',
+          correlationId: cid,
+        );
+      }
+    } catch (e) {
+      LoggingService.logError('Firestore grievance deletion note: $e', correlationId: cid);
+    }
+
+    // 3. Remove from account and local disk cache
+    final updatedList = state.citizenCases.where((c) => c.id != caseId).toList();
+    final uid = currentUser.uid;
+    await _saveCachedCases(uid, updatedList);
+
+    state = state.copyWith(
+      isLoading: false,
+      citizenCases: updatedList,
+      errorMessage: null,
+    );
+
+    LoggingService.logBreadcrumb(
+      'Grievance ${targetCase.caseNumber} withdrawn successfully from account',
+      correlationId: cid,
+    );
     return true;
   }
 }

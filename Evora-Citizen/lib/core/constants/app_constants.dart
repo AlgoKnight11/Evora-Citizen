@@ -20,6 +20,21 @@ class AppConstants {
   static String get cloudinaryUploadUrl =>
       'https://api.cloudinary.com/v1_1/$cloudinaryCloudName/image/upload';
 
+  static String? get cloudinaryApiKey =>
+      _safeEnv('CLOUDINARY_API_KEY') ??
+      (const String.fromEnvironment('CLOUDINARY_API_KEY').isNotEmpty
+          ? const String.fromEnvironment('CLOUDINARY_API_KEY')
+          : null);
+
+  static String? get cloudinaryApiSecret =>
+      _safeEnv('CLOUDINARY_API_SECRET') ??
+      (const String.fromEnvironment('CLOUDINARY_API_SECRET').isNotEmpty
+          ? const String.fromEnvironment('CLOUDINARY_API_SECRET')
+          : null);
+
+  static String get cloudinaryDestroyUrl =>
+      'https://api.cloudinary.com/v1_1/$cloudinaryCloudName/image/destroy';
+
   // Google Gemini AI API Key (Loaded securely from .env)
   static String get geminiApiKey =>
       _safeEnv('GEMINI_API_KEY') ??
